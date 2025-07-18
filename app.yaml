@@ -1,0 +1,18 @@
+command: ['streamlit', 'run', 'app.py']
+env: 
+  - name: 'DATABRICKS_HOST'
+    value: 'databricks_host'
+  - name: 'DATABRICKS_TOKEN'
+    value: 'databricks_token'
+  - name: 'FOUNDATION_MODEL_ENDPOINT'
+    value: 'foundation_model_endpoint'
+  - name: 'EMBEDDING_MODEL_ENDPOINT'
+    value: 'embedding_model_endpoint'
+  - name: 'FALLBACK_EMBEDDING_MODEL'
+    value: 'fallback_embedding_model'
+  - name: 'MAX_CONTENT_TOKENS'
+    value: 'max_content_tokens'
+  - name: 'CACHE_SIZE_LIMIT'
+    value: 'cache_size_limit'
+  - name: 'RESPONSE_CACHE_TTL'
+    value: 'response_cache_ttl'
