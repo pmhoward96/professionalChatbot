@@ -9,11 +9,13 @@ import pandas as pd
 import requests
 from datetime import datetime
 import os
+import traceback
+from src.data.professional_data import load_professional_data
 
 # Configuration for Databricks Native Setup
 class Config:
     # Databricks foundation model endpoints (adjust based on what's available)
-    FOUNDATION_MODEL_ENDPOINT = "databricks-gemma-3-12b"  # or available model
+    FOUNDATION_MODEL_ENDPOINT = "databricks-llama-4-maverick"  # or available model
     EMBEDDING_MODEL = "databricks-bge-large-en"  # Use Databricks embedding model if available
     FALLBACK_EMBEDDING_MODEL = "all-MiniLM-L6-v2"  # Fallback to sentence-transformers
     MAX_CONTEXT_LENGTH = 3000
@@ -39,86 +41,42 @@ def load_embedding_model():
         if client:
             # Test if embeddings endpoint is available
             test_response = client.predict(
-                endpoint="databricks-bge-large-en",  # Common Databricks embedding model
+                endpoint=Config.EMBEDDING_MODEL,  # Common Databricks embedding model
                 inputs={"input": ["test"]}
             )
+            st.success("✅ Databricks embedding model connected successfully")
             return "databricks"
-    except:
-        pass
+    except Exception as e:
+        st.warning(f"⚠️ Databricks embeddings not available: {e}")
+        st.info("🔄 Falling back to sentence-transformers...")
     
     # Fallback to sentence-transformers
-    return SentenceTransformer(Config.FALLBACK_EMBEDDING_MODEL)
+    try:
+        model = SentenceTransformer(Config.FALLBACK_EMBEDDING_MODEL)
+        st.success(f"✅ Loaded fallback embedding model: {Config.FALLBACK_EMBEDDING_MODEL}")
+        return model
+    except Exception as e:
+        st.error(f"❌ Failed to load embedding model: {e}")
+        return None
 
 @st.cache_resource
-def load_professional_data():
+def get_professional_data():
     """Load professional experience data"""
-    professional_data = {
-        "experience": [
-            {
-                "role": "Senior Data Scientist",
-                "company": "TechCorp Inc.",
-                "duration": "2022-2024",
-                "description": "Led machine learning initiatives using Databricks, developed predictive models with MLflow, managed team of 3 junior data scientists. Implemented end-to-end ML pipelines with Delta Lake and Unity Catalog.",
-                "skills": ["Python", "SQL", "Databricks", "MLflow", "Delta Lake", "Unity Catalog", "Team Leadership"]
-            },
-            {
-                "role": "Data Engineer", 
-                "company": "DataFlow Solutions",
-                "duration": "2020-2022",
-                "description": "Built data pipelines on Databricks platform, created real-time streaming analytics with Delta Live Tables, performed large-scale data processing with Apache Spark.",
-                "skills": ["Python", "Apache Spark", "Delta Live Tables", "SQL", "ETL", "Databricks"]
-            }
-        ],
-        "projects": [
-            {
-                "name": "Customer Analytics Platform on Databricks",
-                "description": "Built comprehensive customer analytics platform using Databricks Lakehouse architecture. Implemented real-time feature engineering with Delta Live Tables and MLOps workflows with MLflow.",
-                "tech_stack": ["Databricks", "Delta Lake", "MLflow", "Apache Spark", "Python", "Unity Catalog"],
-                "impact": "Reduced time-to-insights by 70% and improved model deployment efficiency by 50%"
-            },
-            {
-                "name": "Real-time Fraud Detection with Databricks",
-                "description": "Developed streaming fraud detection system using Databricks Structured Streaming and MLflow Model Registry. Processes 100k+ transactions per minute with sub-second latency.",
-                "tech_stack": ["Databricks", "Structured Streaming", "MLflow", "Delta Lake", "Python", "Kafka"],
-                "impact": "Reduced fraud losses by 45% and improved detection accuracy to 99.2%"
-            }
-        ],
-        "skills": {
-            "databricks_platform": ["Databricks Workspace", "Delta Lake", "MLflow", "Unity Catalog", "Delta Live Tables"],
-            "programming": ["Python", "SQL", "Scala", "R"],
-            "ml_frameworks": ["MLflow", "Scikit-learn", "TensorFlow", "PyTorch", "XGBoost"],
-            "data_engineering": ["Apache Spark", "Structured Streaming", "Delta Live Tables", "Apache Kafka"],
-            "cloud_platforms": ["Databricks", "AWS", "Azure"],
-            "mlops": ["MLflow", "Model Registry", "Automated Retraining", "A/B Testing"]
-        },
-        "certifications": [
-            {
-                "name": "Databricks Certified Data Engineer Professional",
-                "year": "2023",
-                "description": "Advanced certification in Databricks platform and data engineering"
-            },
-            {
-                "name": "Databricks Certified Machine Learning Professional", 
-                "year": "2023",
-                "description": "Expert-level MLOps and machine learning on Databricks platform"
-            }
-        ],
-        "education": {
-            "degree": "Master of Science in Data Science",
-            "university": "University XYZ",
-            "year": "2020",
-            "relevant_coursework": ["Machine Learning", "Big Data Systems", "Statistical Modeling"]
-        }
-    }
-    return professional_data
+    return load_professional_data()
 
 class DatabricksRAG:
     """RAG implementation using Databricks native capabilities"""
     
     def __init__(self):
         self.client = get_databricks_client()
-        self.embedding_model = load_embedding_model()
-        self.professional_data = load_professional_data()
+        embedding_result = load_embedding_model()
+        if embedding_result == "databricks":
+            self.embedding_model = "databricks"
+            self.fallback_model = SentenceTransformer(Config.FALLBACK_EMBEDDING_MODEL)
+        else:
+            self.embedding_model = "local"
+            self.fallback_model = embedding_result
+        self.professional_data = get_professional_data()
         self.documents = []
         self.embeddings = []
         self.setup_knowledge_base()
@@ -177,58 +135,164 @@ class DatabricksRAG:
         """Create embeddings using Databricks or fallback model"""
         embeddings = []
         
-        if self.embedding_model == "databricks" and self.client:
-            # Use Databricks embedding endpoint
-            try:
-                response = self.client.predict(
-                    endpoint=Config.EMBEDDING_MODEL,
-                    inputs={"input": self.documents}
-                )
-                embeddings = response["data"]
-            except Exception as e:
-                st.warning(f"Databricks embeddings failed, using fallback: {e}")
-                # Fallback to sentence-transformers
-                model = SentenceTransformer(Config.FALLBACK_EMBEDDING_MODEL)
-                embeddings = model.encode(self.documents)
-        else:
-            # Use sentence-transformers
-            embeddings = self.embedding_model.encode(self.documents)
-        
-        return embeddings
+        try:
+            for i, document in enumerate(self.documents):
+                try:
+                    if self.embedding_model == "databricks" and self.client:
+                        response = self.client.predict(
+                            endpoint=Config.EMBEDDING_MODEL,  # Use the config value
+                            inputs={"input": document}
+                        )
+                        
+                        # Handle different response formats
+                        if isinstance(response, dict):
+                            if "data" in response and isinstance(response["data"], list):
+                                if "embedding" in response["data"][0]:
+                                    embedding = np.array(response["data"][0]["embedding"])
+                                else:
+                                    embedding = np.array(response["data"][0])
+                            elif "embedding" in response:
+                                embedding = np.array(response["embedding"])
+                            else:
+                                # Fallback to local model
+                                embedding = self.fallback_model.encode(document)
+                        else:
+                            embedding = np.array(response)
+                    else:
+                        # Use the fallback model
+                        embedding = self.fallback_model.encode(document)
+                    
+                    embeddings.append(embedding)
+                except Exception as e:
+                    st.sidebar.warning(f"Error embedding document {i}: {str(e)}")
+                    embeddings.append(self.fallback_model.encode(document))
+                    
+            return embeddings
+        except Exception as e:
+            st.sidebar.error(f"Error in _create_embeddings: {str(e)}")
+            st.sidebar.error(traceback.format_exc())
+            return [self.fallback_model.encode(doc) for doc in self.documents]
     
-    def retrieve_context(self, query: str, top_k: int = 3) -> str:
-        """Retrieve relevant context for a query using similarity search"""
-        # Create query embedding
-        if self.embedding_model == "databricks" and self.client:
-            try:
-                query_response = self.client.predict(
-                    endpoint=Config.EMBEDDING_MODEL,
-                    inputs={"input": [query]}
-                )
-                query_embedding = np.array(query_response["data"][0])
-            except:
-                # Fallback
-                model = SentenceTransformer(Config.FALLBACK_EMBEDDING_MODEL)
-                query_embedding = model.encode([query])[0]
+    def retrieve_context(self, query: str, top_k: int = 3, max_context_tokens: int = 1500) -> str:
+        """Retrieve relevant context for a query using similarity search with token management"""
+        try:
+            # Create query embedding
+            if self.embedding_model == "databricks" and self.client:
+                try:
+                    query_response = self.client.predict(
+                        endpoint=Config.EMBEDDING_MODEL,  # Use config value
+                        inputs={"input": query}
+                    )
+                    # Handle different possible response formats
+                    if isinstance(query_response, dict):
+                        if "data" in query_response and isinstance(query_response["data"], list):
+                            if "embedding" in query_response["data"][0]:
+                                query_embedding = np.array(query_response["data"][0]["embedding"])
+                            else:
+                                query_embedding = np.array(query_response["data"][0])
+                        elif "embedding" in query_response:
+                            query_embedding = np.array(query_response["embedding"])
+                        else:
+                            # Fallback to local model if format is unexpected
+                            query_embedding = self.fallback_model.encode(query)
+                    else:
+                        query_embedding = np.array(query_response)
+                except Exception as e:
+                    st.sidebar.error(f"Error with Databricks embedding: {str(e)}")
+                    query_embedding = self.fallback_model.encode(query)
+            else:
+                query_embedding = self.fallback_model.encode(query)
+        
+            # Ensure query_embedding is a numpy array
+            if not isinstance(query_embedding, np.ndarray):
+                query_embedding = np.array(query_embedding)
+                
+            # Calculate similarities
+            similarities = []
+            for i, doc_embedding in enumerate(self.embeddings):
+                # Ensure doc_embedding is also a numpy array
+                if not isinstance(doc_embedding, np.ndarray):
+                    doc_embedding = np.array(doc_embedding)
+                    
+                # Compute cosine similarity
+                norm_q = np.linalg.norm(query_embedding)
+                norm_d = np.linalg.norm(doc_embedding)
+                
+                if norm_q > 0 and norm_d > 0:  # Avoid division by zero
+                    similarity = np.dot(query_embedding, doc_embedding) / (norm_q * norm_d)
+                else:
+                    similarity = 0
+                    
+                similarities.append((i, similarity))
+        
+            # Sort by similarity and retrieve top_k
+            similarities.sort(key=lambda x: x[1], reverse=True)
+            selected_indices = [idx for idx, _ in similarities[:top_k]]
+            
+            # Build context from selected chunks - FIXED
+            context_parts = []
+            total_tokens = 0
+            
+            for idx in selected_indices:
+                # Use documents directly
+                chunk_text = self.documents[idx]
+                tokens = len(chunk_text.split())  # Simple token estimation
+                
+                if total_tokens + tokens <= max_context_tokens:
+                    context_parts.append(chunk_text)
+                    total_tokens += tokens
+                else:
+                    break
+                
+            return "\n\n".join(context_parts)
+        except Exception as e:
+            st.sidebar.error(f"Error in retrieve_context: {str(e)}")
+            st.sidebar.error(traceback.format_exc())
+            return "Error retrieving context."
+    
+    def get_contextual_summary(self, query_type: str) -> str:
+        """Get a focused summary based on query type"""
+        if "project" in query_type.lower():
+            return self._get_projects_summary()
+        elif "skill" in query_type.lower() or "technology" in query_type.lower():
+            return self._get_skills_summary()
+        elif "experience" in query_type.lower() or "role" in query_type.lower():
+            return self._get_experience_summary()
         else:
-            query_embedding = self.embedding_model.encode([query])[0]
-        
-        # Calculate similarities
-        similarities = []
-        for doc_embedding in self.embeddings:
-            similarity = np.dot(query_embedding, doc_embedding) / (
-                np.linalg.norm(query_embedding) * np.linalg.norm(doc_embedding)
-            )
-            similarities.append(similarity)
-        
-        # Get top-k most similar documents
-        top_indices = np.argsort(similarities)[-top_k:][::-1]
-        
-        relevant_docs = []
-        for idx in top_indices:
-            relevant_docs.append(self.documents[idx])
-        
-        return "\n\n".join(relevant_docs)
+            return self._get_general_summary()
+    
+    def _get_projects_summary(self) -> str:
+        """Focused project summary"""
+        projects = self.professional_data["projects"]
+        summary = "Key Projects:\n"
+        for proj in projects[:2]:  # Limit to top 2 projects
+            summary += f"• {proj['name']}: {proj['description'][:150]}...\n"
+        return summary
+    
+    def _get_skills_summary(self) -> str:
+        """Focused skills summary"""
+        skills = self.professional_data["skills"]
+        summary = "Technical Skills:\n"
+        for category, skill_list in skills.items():
+            if category in ["databricks_platform", "programming", "ml_frameworks"]:
+                summary += f"• {category.replace('_', ' ').title()}: {', '.join(skill_list[:5])}\n"
+        return summary
+    
+    def _get_experience_summary(self) -> str:
+        """Focused experience summary"""
+        experiences = self.professional_data["experience"]
+        summary = "Professional Experience:\n"
+        for exp in experiences[:2]:  # Limit to recent experiences
+            summary += f"• {exp['role']} at {exp['company']}: {exp['description'][:150]}...\n"
+        return summary
+    
+    def _get_general_summary(self) -> str:
+        """General professional summary"""
+        return """Professional Overview:
+• Senior Data Scientist/Engineer with extensive Databricks expertise
+• 4+ years in ML/Data Engineering with focus on Lakehouse architecture
+• Certified in Databricks Data Engineering and ML Professional
+• Experience with end-to-end ML pipelines, real-time analytics, and MLOps"""
 
 class DatabricksChatBot:
     """Chatbot using Databricks foundation models"""
@@ -238,35 +302,48 @@ class DatabricksChatBot:
         self.rag = DatabricksRAG()
         
     def generate_response(self, user_query: str, chat_history: List[Dict]) -> str:
-        """Generate response using Databricks foundation model"""
+        """Generate response using Databricks foundation model with smart context management"""
         
         if not self.client:
             return "I'm sorry, but I'm having trouble connecting to Databricks services right now."
         
-        # Retrieve relevant professional context
-        context = self.rag.retrieve_context(user_query)
+        # Analyze query to determine focus area
+        query_lower = user_query.lower()
         
-        # Create system message
-        system_message = f"""You are a professional AI assistant representing a skilled data scientist and ML engineer with extensive Databricks experience. 
+        # Get focused context based on query type
+        if any(word in query_lower for word in ["project", "built", "developed", "created"]):
+            context = self.rag.retrieve_context(user_query, top_k=2, max_context_tokens=1000)
+            context += "\n\n" + self.rag.get_contextual_summary("project")
+        elif any(word in query_lower for word in ["skill", "technology", "tool", "programming"]):
+            context = self.rag.retrieve_context(user_query, top_k=2, max_context_tokens=800)
+            context += "\n\n" + self.rag.get_contextual_summary("skills")
+        elif any(word in query_lower for word in ["experience", "role", "job", "work"]):
+            context = self.rag.retrieve_context(user_query, top_k=2, max_context_tokens=1000)
+            context += "\n\n" + self.rag.get_contextual_summary("experience")
+        else:
+            # General query - use standard retrieval
+            context = self.rag.retrieve_context(user_query, top_k=3, max_context_tokens=1200)
         
-        Your role is to discuss their professional background, technical expertise, and project experience based on the provided context.
+        # Create focused system message
+        system_message = f"""You are a professional AI assistant representing a skilled data scientist and ML engineer with extensive Databricks experience.
+
+Based on the following context, answer questions about their professional background in a conversational and enthusiastic manner.
+
+Context:
+{context}
+
+Guidelines:
+- Be specific and reference concrete examples from the context
+- Show enthusiasm for their Databricks expertise
+- If the context doesn't contain relevant information, provide a general response about their capabilities
+- Keep responses focused and under 200 words
+- Highlight unique value propositions
+"""
         
-        Professional Context:
-        {context}
-        
-        Guidelines:
-        - Be enthusiastic and professional when discussing their experience
-        - Highlight their Databricks expertise and data engineering skills
-        - Reference specific projects and achievements from the context
-        - If asked about technologies they haven't used, be honest but mention related experience
-        - Keep responses conversational but informative
-        - Focus on their unique value proposition as a Databricks expert
-        """
-        
-        # Prepare messages for foundation model
+        # Prepare messages - keep chat history minimal for performance
         messages = [{"role": "system", "content": system_message}]
         
-        # Add recent chat history (limit to stay within context window)
+        # Only include last 2 exchanges to preserve context window
         recent_history = chat_history[-4:] if len(chat_history) > 4 else chat_history
         messages.extend(recent_history)
         
@@ -279,7 +356,7 @@ class DatabricksChatBot:
                 endpoint=Config.FOUNDATION_MODEL_ENDPOINT,
                 inputs={
                     "messages": messages,
-                    "max_tokens": 500,
+                    "max_tokens": 300,  # Reduced for better performance
                     "temperature": 0.7
                 }
             )
@@ -290,7 +367,7 @@ class DatabricksChatBot:
             return f"I apologize, but I'm having trouble processing your request. Please try again. Error: {str(e)}"
 
 # Streamlit App
-def streamlit_app():
+def main():
     st.set_page_config(
         page_title="Databricks Professional AI Assistant",
         page_icon="🔥",
