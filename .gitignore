@@ -8,6 +8,7 @@ __pycache__/
 .Python
 
 # IDE
+.vscode
 .vscode/settings.json
 .idea/
 *.swp
