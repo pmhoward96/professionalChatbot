@@ -19,8 +19,14 @@ class Config:
     EMBEDDING_MODEL = "databricks-bge-large-en"  # Use Databricks embedding model if available
     FALLBACK_EMBEDDING_MODEL = "all-MiniLM-L6-v2"  # Fallback to sentence-transformers
     MAX_CONTEXT_LENGTH = 3000
-    DATABRICKS_HOST = None  # Will be auto-detected
-    DATABRICKS_TOKEN = None  # Will use default authentication
+
+    try:
+        import dbutils  # Only available on Databricks
+        DATABRICKS_HOST = dbutils.secrets.get("portfolio", "databricks_host")
+        DATABRICKS_TOKEN = dbutils.secrets.get("portfolio", "databricks_token")
+    except Exception:
+        DATABRICKS_HOST = os.getenv("DATABRICKS_HOST")
+        DATABRICKS_TOKEN = os.getenv("DATABRICKS_TOKEN")
 
 # Initialize Databricks clients
 @st.cache_resource
