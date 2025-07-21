@@ -21,7 +21,6 @@ class Config:
     MAX_CONTEXT_LENGTH = 3000
 
     try:
-        import dbutils  # Only available on Databricks
         DATABRICKS_HOST = dbutils.secrets.get("portfolio", "databricks_host")
         DATABRICKS_TOKEN = dbutils.secrets.get("portfolio", "databricks_token")
         SOURCE = "databricks_secrets"
