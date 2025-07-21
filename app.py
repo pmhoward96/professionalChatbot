@@ -24,14 +24,19 @@ class Config:
         import dbutils  # Only available on Databricks
         DATABRICKS_HOST = dbutils.secrets.get("portfolio", "databricks_host")
         DATABRICKS_TOKEN = dbutils.secrets.get("portfolio", "databricks_token")
+        SOURCE = "databricks_secrets"
     except Exception:
         DATABRICKS_HOST = os.getenv("DATABRICKS_HOST")
         DATABRICKS_TOKEN = os.getenv("DATABRICKS_TOKEN")
+        SOURCE = "env"
 
 # Initialize Databricks clients
 @st.cache_resource
 def get_databricks_client():
     """Initialize Databricks MLflow deployment client"""
+    st.sidebar.info(f"Databricks Host: {Config.DATABRICKS_HOST}")
+    st.sidebar.info(f"Databricks Token: {'SET' if Config.DATABRICKS_TOKEN else 'NOT SET'}")
+    st.sidebar.info(f"Config Source: {Config.SOURCE}")
     try:
         return mlflow.deployments.get_deploy_client("databricks")
     except Exception as e:
@@ -42,9 +47,9 @@ def get_databricks_client():
 def load_embedding_model():
     """Load embedding model - try Databricks first, fallback to sentence-transformers"""
     try:
-        # Try to use Databricks embedding endpoint first
         client = get_databricks_client()
         if client:
+            st.sidebar.info(f"Embedding endpoint: {Config.EMBEDDING_MODEL}")
             # Test if embeddings endpoint is available
             test_response = client.predict(
                 endpoint=Config.EMBEDDING_MODEL,  # Common Databricks embedding model
